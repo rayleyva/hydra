@@ -36,6 +36,9 @@ function(
         		jobIds:"",
         		type:-1,
         		timeout:-1,
+        		canaryPath: "",
+        		canaryCheckDates: "",
+        		canaryConfigThreshold: "",
         		email:""},
         	save:function(){
         		var postData = {
@@ -43,7 +46,9 @@ function(
         			type:$("#alertType").val(),
         			timeout:this.get("timeout"),
         			email:this.get("email"),
-        			jobIds:this.get("jobIds")
+        			jobIds:this.get("jobIds"),
+        			canaryPath:this.get("canaryPath"),
+        			canaryConfigThreshold:this.get("canaryConfigThreshold"),
         		};
         		if (!this.isNew()) {
         			postData.alertId= this.get("alertId");
@@ -218,6 +223,10 @@ function(
         	},
         	handleSaveButtonClick:function(event){
             	var self=this,isNew=this.model.isNew();
+            	if (!this.verifyConfig()) {
+            		Alertify.log.error("Failed to save alert -- config failed verification.")
+            		return;
+            	}
             	this.model.save().done(function(data){
              		Alertify.log.success("Alert saved successfully.");
              		if (!self.model.get("alertId")) {
@@ -261,9 +270,42 @@ function(
         	},
         	updateFormOptions:function() {
         		var type = parseInt($("#alertType").val());
-        		// Alert type 0 and 1 do not use the timeout field
-        		$("#alertTimeout").toggle(type >= 2);
-        	}        	
+        		// Timeouts are only used for rekick/runtime alerts
+        		$("#alertTimeout").toggle(type == 2 || type == 3);
+        		// Only show canary config for canary alerts (4 and 5)
+        		$("#alertCanaryConfig").toggle(type == 4 || type == 5);
+        		if (type == 4) {
+        			$("#canaryPathHint").text("For example, 'split/importantfiles/{{now-1}}/*.gz'. Mesh lookups are performed relative to the gold directories, so do not include jobid/taskid/gold in your path.")
+        		} else if (type == 5) {
+        			$("#canaryPathHint").text("For example, 'root/ymd/{{now-1}}:+count'. The query should have exactly one '+' (generally, +count) and return a single numeric quantity per task.");
+        		}
+        	},
+        	verifyConfig: function() {
+        		var type = parseInt($("#alertType").val());
+        		var email = this.model.get("email");
+        		var jobIds = this.model.get("jobIds");
+        		if (!email || !jobIds) {
+        			Alertify.log.error("Please enter an email and at least one jobId for this alert.");
+        			return false;
+        		}
+        		if (email.indexOf("@") == -1) {
+        			Alertify.log.error("Alert email field appears invalid -- please include an '@' character.");
+        			return false;
+        		}
+        		if (type == 4 || type == 5) {        		
+        			var canaryPath = this.model.get("canaryPath");
+        			var canaryConfigThreshold = this.model.get("canaryConfigThreshold");
+        			if (!canaryPath || !canaryConfigThreshold) {
+        				Alertify.log.error("Please fill out all canary configuration fields.");
+        				return false;
+        			}
+        			if (type == 5 && (canaryPath.match(/\+/g)||[]).length != 1) {
+ 						Alertify.log.error("Please include exactly one '+' corresponding to a numeric field (generally, +count) in your canary path field.");
+ 						return false;
+        			}
+        		}
+        		return true;
+        	}
     	});    
     	return {
     		Model:Model,

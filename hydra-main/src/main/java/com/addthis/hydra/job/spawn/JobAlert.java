@@ -26,6 +26,7 @@ import com.addthis.hydra.job.Job;
 import com.addthis.hydra.job.JobState;
 import com.addthis.maljson.JSONObject;
 
+import com.addthis.meshy.MeshyClient;
 import com.google.common.collect.ImmutableMap;
 
 import org.slf4j.Logger;
@@ -43,6 +44,8 @@ public class JobAlert implements Codec.Codable {
     private static final int ON_COMPLETE = 1;
     private static final int RUNTIME_EXCEEDED = 2;
     private static final int REKICK_TIMEOUT = 3;
+    private static final int SPLIT_CANARY = 4;
+    private static final int MAP_CANARY = 5;
 
     @Codec.Set(codable = true)
     private String alertId;
@@ -56,6 +59,10 @@ public class JobAlert implements Codec.Codable {
     private String email;
     @Codec.Set(codable = true)
     private String[] jobIds;
+    @Codec.Set(codable = true)
+    private String canaryPath;
+    @Codec.Set(codable = true)
+    private Integer canaryConfigThreshold;
 
     /* For alerts tracking multiple jobs, this variable marks if the set of active jobs has changed since the last alert check */
     private boolean hasChanged = false;
@@ -69,10 +76,15 @@ public class JobAlert implements Codec.Codable {
     /* Map temporarily storing prior active jobs that have since cleared */
     private final HashMap<String, String> priorActiveJobs;
 
-    private static final Map<Integer, String> alertMessageMap = ImmutableMap.of(ON_ERROR, "Task is in Error ",
-            ON_COMPLETE, "Task has Completed ",
-            RUNTIME_EXCEEDED, "Task runtime exceeded ",
-            REKICK_TIMEOUT, "Task rekick exceeded ");
+    private Long lastActual = 0l;
+
+    private static final ImmutableMap<Integer, String> alertMessageMap = new ImmutableMap.Builder<Integer,String>().put(ON_ERROR, "Task is in Error ")
+            .put(ON_COMPLETE, "Task has Completed ")
+            .put(RUNTIME_EXCEEDED, "Task runtime exceeded ")
+            .put(REKICK_TIMEOUT, "Task rekick exceeded ")
+            .put(SPLIT_CANARY, "Split canary ")
+            .put(MAP_CANARY, "Map canary")
+            .build();
 
     public JobAlert() {
         this.lastAlertTime = -1;
@@ -117,6 +129,13 @@ public class JobAlert implements Codec.Codable {
         this.lastAlertTime = -1;
     }
 
+    public void setActiveJobs(Map<String, String> activeJobsNew) {
+        synchronized (activeJobs) {
+            activeJobs.clear();
+            activeJobs.putAll(activeJobsNew);
+        }
+    }
+
     public long getLastAlertTime() {
         return lastAlertTime;
     }
@@ -157,6 +176,22 @@ public class JobAlert implements Codec.Codable {
         this.jobIds = jobIds;
     }
 
+    public String getCanaryPath() {
+        return canaryPath;
+    }
+
+    public void setCanaryPath(String canaryPath) {
+        this.canaryPath = canaryPath;
+    }
+
+    public Integer getCanaryConfigThreshold() {
+        return canaryConfigThreshold;
+    }
+
+    public void setCanaryConfigThreshold(Integer canaryConfigThreshold) {
+        this.canaryConfigThreshold = canaryConfigThreshold;
+    }
+
     public JSONObject toJSON() throws Exception {
         JSONObject rv = CodecJSON.encodeJSON(this);
         if (jobIds != null) {
@@ -170,7 +205,7 @@ public class JobAlert implements Codec.Codable {
      * @param jobs A list of jobs to check
      * @return True if the alert has changed state from fired to cleared or vice versa
      */
-    public boolean checkAlertForJobs(List<Job> jobs) {
+    public boolean checkAlertForJobs(List<Job> jobs, MeshyClient meshyClient) {
         boolean activeNow = false;
         HashMap<String, String> activeJobBefore;
         HashMap<String, String> activeJobAfter;
@@ -178,7 +213,7 @@ public class JobAlert implements Codec.Codable {
             activeJobBefore = new HashMap<>(activeJobs);
             activeJobs.clear();
             for (Job job : jobs) {
-                if (alertActiveForJob(job)) {
+                if (alertActiveForJob(meshyClient, job)) {
                     activeNow = true;
                     activeJobs.put(job.getId(), job.getDescription());
                     // Don't break the loop to ensure that all triggering jobs will be added to activeJobs
@@ -216,10 +251,13 @@ public class JobAlert implements Codec.Codable {
         sb.append(JobAlertRunner.getClusterHead());
         sb.append(" - ");
         sb.append(hasAlerted() ? getActiveJobs().toString() : priorActiveJobs.toString());
+        if (isCanaryAlert()) {
+            sb.append(" - expected=" + canaryConfigThreshold + " actual=" + lastActual);
+        }
         return sb.toString();
     }
 
-    private boolean alertActiveForJob(Job job) {
+    private boolean alertActiveForJob(MeshyClient meshClient, Job job) {
         long currentTime = System.currentTimeMillis();
         switch (type) {
             case ON_ERROR:
@@ -232,10 +270,47 @@ public class JobAlert implements Codec.Codable {
             case REKICK_TIMEOUT:
                 return (!job.getState().equals(JobState.RUNNING) && (job.getEndTime() != null) &&
                     ((currentTime - job.getEndTime()) > timeout * MINUTE));
+            case SPLIT_CANARY:
+                return checkSplitCanary(meshClient, job);
+            case MAP_CANARY:
+                return checkMapCanary(job);
             default:
                 log.warn("Warning: alert " + alertId + " has unexpected type " + type);
                 return false;
         }
+    }
+
+    private boolean checkMapCanary(Job job) {
+        if (!isCanaryConfigValid()) {
+            return false;
+        }
+        try {
+            long queryVal = JobAlertUtil.getQueryCount(job.getId(), canaryPath);
+            lastActual = queryVal;
+            return queryVal < canaryConfigThreshold;
+        } catch (Exception ex) {
+            log.warn("Exception during canary check: ", ex);
+            return false;
+        }
+    }
+
+    private boolean checkSplitCanary(MeshyClient meshClient, Job job) {
+        if (!isCanaryConfigValid()) {
+            return false;
+        }
+        // Strip off preceding slash, if it exists.
+        String finalPath = canaryPath.startsWith("/") ? canaryPath.substring(1) : canaryPath;
+        long totalBytes = JobAlertUtil.getTotalBytesFromMesh(meshClient, job.getId(), finalPath);
+        lastActual = totalBytes;
+        return totalBytes < canaryConfigThreshold;
+    }
+
+    private boolean isCanaryConfigValid() {
+        boolean valid = !(canaryPath == null || canaryConfigThreshold == null || canaryConfigThreshold < 0);
+        if (!valid) {
+            log.warn("Warning: invalid config for alert {}: canaryPath={} canaryConfigThreshold={}", alertId, canaryPath, canaryConfigThreshold);
+        }
+        return valid;
     }
 
     @Override
@@ -245,5 +320,9 @@ public class JobAlert implements Codec.Codable {
         } catch (Exception e) {
             return super.toString();
         }
+    }
+
+    public boolean isCanaryAlert() {
+        return type == SPLIT_CANARY || type == MAP_CANARY;
     }
 }

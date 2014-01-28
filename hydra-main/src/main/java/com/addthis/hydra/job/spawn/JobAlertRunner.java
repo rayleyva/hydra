@@ -13,6 +13,7 @@
  */
 package com.addthis.hydra.job.spawn;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -25,18 +26,17 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.text.DecimalFormat;
 import java.text.SimpleDateFormat;
 
+import com.addthis.basis.util.JitterClock;
 import com.addthis.basis.util.Parameter;
 
 import com.addthis.codec.CodecJSON;
-import com.addthis.hydra.job.Job;
-import com.addthis.hydra.job.JobTask;
-import com.addthis.hydra.job.JobTaskState;
-import com.addthis.hydra.job.Spawn;
+import com.addthis.hydra.job.*;
 import com.addthis.hydra.job.store.SpawnDataStore;
 import com.addthis.hydra.util.EmailUtil;
 import com.addthis.maljson.JSONArray;
 import com.addthis.maljson.JSONObject;
 
+import com.addthis.meshy.MeshyClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,17 +44,21 @@ import static com.addthis.hydra.job.store.SpawnDataStoreKeys.SPAWN_COMMON_ALERT_
 import static com.addthis.hydra.job.store.SpawnDataStoreKeys.SPAWN_COMMON_ALERT_PATH;
 
 /**
- * This class runs a timer that scans the jobs for any email alerts and sends them.
+ * This class runs over the set of job alerts, sending trigger/clear emails as appropriate
  */
 public class JobAlertRunner {
 
     private static final Logger log = LoggerFactory.getLogger(JobAlertRunner.class);
-    private static String clusterHead = Parameter.value("spawn.localhost", "unknown");
+    private static String clusterHead = Spawn.getHttpHost();
     private final Spawn spawn;
     private final SpawnDataStore spawnDataStore;
 
-    private static final long REPEAT = Parameter.longValue("spawn.job.alert.repeat", 60 * 1000);
-    private static final long DELAY = Parameter.longValue("spawn.job.alert.delay", 60 * 1000);
+    private static final long ALERT_REPEAT_MILLIS = Parameter.longValue("spawn.job.alert.repeat", 5 * 60 * 1000);
+    private static final long ALERT_DELAY_MILLIS = Parameter.longValue("spawn.job.alert.delay", 60 * 1000);
+
+    private static final String meshHost = SpawnMesh.getMeshHost();
+    private static final int meshPort = SpawnMesh.getMeshPort();
+    private MeshyClient meshyClient;
 
     private static final long GIGA_BYTE = (long) Math.pow(1024, 3);
     private static final SimpleDateFormat dateFormat = new SimpleDateFormat("yyMMdd-HHmm");
@@ -70,6 +74,12 @@ public class JobAlertRunner {
     public JobAlertRunner(Spawn spawn) {
         this.spawn = spawn;
         this.spawnDataStore = spawn.getSpawnDataStore();
+        try {
+            meshyClient = new MeshyClient(meshHost, meshPort);
+        } catch (IOException e) {
+            log.warn("Warning: failed to instantiate job alert mesh client", e);
+            meshyClient = null;
+        }
         Timer alertTimer = new Timer("JobAlertTimer");
         this.alertsEnabled = spawn.areAlertsEnabled();
         alertTimer.schedule(new TimerTask() {
@@ -77,7 +87,7 @@ public class JobAlertRunner {
             public void run() {
                 scanAlerts();
             }
-        }, DELAY, REPEAT);
+        }, ALERT_DELAY_MILLIS, ALERT_REPEAT_MILLIS);
         this.alertMap = new ConcurrentHashMap<>();
         loadAlertMap();
     }
@@ -101,7 +111,6 @@ public class JobAlertRunner {
      */
     public void scanAlerts() {
         if (alertsEnabled) {
-            log.info("Running alert scan...");
             synchronized (alertMap) {
                 for (Map.Entry<String, JobAlert> entry : alertMap.entrySet()) {
                     checkAlert(entry.getValue());
@@ -115,7 +124,7 @@ public class JobAlertRunner {
      * @param alert The actual alert object
      */
     private void checkAlert(JobAlert alert) {
-        boolean alertHasChanged = alert.checkAlertForJobs(getAlertJobs(alert));
+        boolean alertHasChanged = alert.checkAlertForJobs(getAlertJobs(alert), meshyClient);
         if (alertHasChanged) {
             emailAlert(alert);
         }
@@ -220,7 +229,7 @@ public class JobAlertRunner {
         StringBuilder sb = new StringBuilder();
         sb.append("Alert: " + jobAlert.getAlertStatus() + " \n");
         for (String jobId : activeJobs.keySet()) {
-             sb.append(summary(spawn.getJob(jobId)) + "\n");
+            sb.append(summary(spawn.getJob(jobId)) + "\n");
         }
         EmailUtil.email(jobAlert.getEmail(), status, sb.toString());
         putAlert(jobAlert.getAlertId(), jobAlert);
@@ -261,10 +270,11 @@ public class JobAlertRunner {
 
     public void putAlert(String id, JobAlert alert) {
         synchronized (alertMap) {
-            JobAlert oldAlert = alertMap.contains(id) ? alertMap.get(id) : null; // ConcurrentHashMap throws NPE on failed 'get'
+            JobAlert oldAlert = alertMap.containsKey(id) ? alertMap.get(id) : null; // ConcurrentHashMap throws NPE on failed 'get'
             if (oldAlert != null) {
                 // Inherit old alertTime even if the alert has changed in other ways
                 alert.setLastAlertTime(oldAlert.getLastAlertTime());
+                alert.setActiveJobs(oldAlert.getActiveJobs());
             }
             alertMap.put(id, alert);
         }
