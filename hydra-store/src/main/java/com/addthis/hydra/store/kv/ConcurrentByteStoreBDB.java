@@ -29,7 +29,6 @@ import com.addthis.basis.util.Files;
 import com.addthis.hydra.store.db.SettingsJE;
 import com.addthis.hydra.store.kv.ExternalPagedStore.ByteStore;
 import com.addthis.hydra.store.kv.ExternalPagedStore.PageEntry;
-import com.addthis.hydra.store.util.JEUtil;
 
 import com.sleepycat.je.CheckpointConfig;
 import com.sleepycat.je.Cursor;
@@ -78,13 +77,9 @@ public class ConcurrentByteStoreBDB implements ByteStore {
         EnvironmentConfig bdb_eco = new EnvironmentConfig();
         bdb_eco.setReadOnly(ro);
         bdb_eco.setAllowCreate(!ro);
-        bdb_eco.setTransactional(false);
         bdb_eco.setLockTimeout(2, TimeUnit.MINUTES);
 //          bdb_eco.setDurability(Durability.COMMIT_NO_SYNC);
-        if (ro) {
-            bdb_eco.setConfigParam(EnvironmentConfig.ENV_RUN_CLEANER, "false");    // Disable log cleaner thread
-        }
-        JEUtil.mergeSystemProperties(bdb_eco);
+        SettingsJE.mergeSystemProperties(bdb_eco);
         SettingsJE.updateEnvironmentConfig(settings, bdb_eco);
         bdb_env = new Environment(dir, bdb_eco);
         bdb_cfg = new DatabaseConfig();

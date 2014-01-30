@@ -15,9 +15,11 @@ package com.addthis.hydra.store.db;
 
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Enumeration;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Properties;
 import java.util.TreeMap;
 
 import com.sleepycat.je.Database;
@@ -28,19 +30,13 @@ public class SettingsJE extends SettingsDB {
 
     public static final String JE_READ_ONLY = "cs.je.readOnly";
     public static final String JE_CACHE_SIZE = "cs.je.cacheSize";
-    public static final String JE_CACHE_SHARED = "cs.je.cacheShared";
-    public static final String JE_TRANSACTIONAL = "cs.je.transactional";
     public static final String JE_DEFERRED_WRITE = "cs.je.deferredWrite";
     public static final String JE_LOG_MINUSED = "cs.je.logMinUsed";
     public static final String JE_LOGFILE_MINUSED = "cs.je.logFileMinUsed";
 
-    private static final Collection<String> setSet = Arrays.asList(new String[]{
-            JE_READ_ONLY,
+    private static final Collection<String> setSet = Arrays.asList(JE_READ_ONLY,
             JE_CACHE_SIZE,
-            JE_CACHE_SHARED,
-            JE_TRANSACTIONAL,
-            JE_DEFERRED_WRITE,
-    });
+            JE_DEFERRED_WRITE);
 
     public static Map<String, Object> dumpState(Database db) {
         TreeMap<String, Object> map = new TreeMap<String, Object>();
@@ -77,8 +73,6 @@ public class SettingsJE extends SettingsDB {
 
     public static void updateEnvironmentConfig(SettingsDB settings, EnvironmentConfig eco) {
         if (settings.hasValue(JE_READ_ONLY)) eco.setReadOnly(settings.isTrue(JE_READ_ONLY));
-        if (settings.hasValue(JE_TRANSACTIONAL)) eco.setTransactional(settings.isTrue(JE_TRANSACTIONAL));
-        if (settings.hasValue(JE_CACHE_SHARED)) eco.setSharedCache(settings.isTrue(JE_CACHE_SHARED));
         String cacheSize = settings.getValue(JE_CACHE_SIZE);
         if (cacheSize != null) {
             if (cacheSize.endsWith("%")) {
@@ -97,5 +91,24 @@ public class SettingsJE extends SettingsDB {
 
     public static void updateDatabaseConfig(SettingsDB settings, DatabaseConfig config) {
         if (settings.hasValue(JE_DEFERRED_WRITE)) config.setDeferredWrite(settings.isTrue(JE_DEFERRED_WRITE));
+    }
+
+    /**
+     * Sets JE EnvironmentConfig params using Java System paremeters
+     */
+    public static String mergeSystemProperties(EnvironmentConfig eco) {
+        // load properties from system je.*
+        Properties prop = System.getProperties();
+        StringBuilder sb = new StringBuilder();
+        for (Enumeration<?> e = prop.propertyNames(); e.hasMoreElements();) {
+            String key = (String) e.nextElement();
+            if (!key.startsWith("je.")) {
+                continue;
+            }
+            String val = prop.getProperty(key);
+            sb.append(key).append("=").append(val).append(" ");
+            eco.setConfigParam(key, val);
+        }
+        return sb.toString();
     }
 }

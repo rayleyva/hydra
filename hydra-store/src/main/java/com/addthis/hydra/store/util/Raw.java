@@ -153,6 +153,7 @@ public final class Raw implements Comparable<Raw>, Codec.Codable {
         return cat(ab.raw);
     }
 
+    @Override
     public int compareTo(Raw o) {
         if (longcompare) {
             return compare(getLongs(), o.getLongs());
@@ -167,7 +168,7 @@ public final class Raw implements Comparable<Raw>, Codec.Codable {
         return compare;
     }
 
-    private int compare(long a[], long b[]) {
+    private static int compare(long a[], long b[]) {
         for (int al = a.length, bl = b.length, i = 0; i < al; i++) {
             if (bl <= i) {
                 return 1;
@@ -184,7 +185,7 @@ public final class Raw implements Comparable<Raw>, Codec.Codable {
         return a.length == b.length ? 0 : -1;
     }
 
-    private long[] bytesToLong(byte data[]) {
+    private static long[] bytesToLong(byte data[]) {
         if (data.length % 8 != 0) {
             data = Bytes.cat(data, new byte[8 - (data.length % 8)]);
         }
