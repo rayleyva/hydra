@@ -74,6 +74,7 @@
     <hydra.dep.commons-codec.version>1.8</hydra.dep.commons-codec.version>
     <hydra.dep.sleepycat.je.version>5.0.73</hydra.dep.sleepycat.je.version>
     <hydra.dep.apache.httpclient.version>3.1</hydra.dep.apache.httpclient.version>
+    <hydra.dep.jetty.version>9.1.1.v20140108</hydra.dep.jetty.version>
   </properties>
 
   <!--

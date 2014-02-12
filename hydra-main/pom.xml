@@ -92,12 +92,12 @@
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-servlet</artifactId>
-      <version>8.1.4.v20120524</version>
+      <version>${hydra.dep.jetty.version}</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-websocket</artifactId>
-      <version>8.1.4.v20120524</version>
+      <version>${hydra.dep.jetty.version}</version>
     </dependency>
     <dependency>
       <groupId>com.sun.jersey</groupId>

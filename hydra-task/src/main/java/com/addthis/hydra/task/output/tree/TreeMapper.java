@@ -145,17 +145,10 @@ public final class TreeMapper extends DataOutputTypeList implements QuerySource,
     private int treeType = Parameter.intValue("mapper.tree.type", 0);
 
     /**
-     * Default is either "mapper.http" configuration value or true.
-     */
-    @Codec.Set(codable = true)
-    private boolean enableHttp = Parameter.boolValue("mapper.http", true);
-
-    /**
      * Default is either "mapper.query" configuration value or false.
      */
     @Codec.Set(codable = true)
     private boolean enableQuery = Parameter.boolValue("mapper.query", false);
-
 
     /**
      * Default is either "mapper.minion.usejmx" configuration value or true.
@@ -442,7 +435,7 @@ public final class TreeMapper extends DataOutputTypeList implements QuerySource,
         if (Strings.isEmpty(localhost)) {
             localhost = InetAddress.getLocalHost().getHostAddress();
         }
-        log.info("[init] java=" + System.getProperty("java.vm.version") + " query=" + enableQuery + " http=" + enableHttp + " jmx=" + enableJmx + " live=" + live);
+        log.info("[init] java=" + System.getProperty("java.vm.version") + " query=" + enableQuery + " jmx=" + enableJmx + " live=" + live);
         log.info("[init] host=" + localhost + " port=" + port + " target=" + root + " job=" + config.jobId);
 
         Path treePath = Paths.get(runConfig.dir, "data");
@@ -458,14 +451,6 @@ public final class TreeMapper extends DataOutputTypeList implements QuerySource,
                                                 " for configuration parameter \"treeType\"");
         }
         bench = new Bench(EnumSet.allOf(BENCH.class), 1000);
-
-        if (enableHttp) {
-            jetty = new Server(port > 0 ? port++ : 0);
-            jetty.start();
-            int httpPort = jetty.getConnectors()[0].getLocalPort();
-            log.info("[init.http] http://" + localhost + ":" + httpPort + "/");
-            Files.write(new File("job.port"), Bytes.toBytes(Integer.toString(httpPort)), false);
-        }
 
         int queryPort = 0;
         if (enableQuery) {
@@ -917,8 +902,6 @@ public final class TreeMapper extends DataOutputTypeList implements QuerySource,
             if (liveQueryServer != null) {
                 liveQueryServer.close();
             }
-            // disable web interface
-            jetty.stop();
             if (queryServer != null) {
                 // cancel running queries
                 queryEngine.cancelActiveThreads();

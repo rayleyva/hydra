@@ -30,8 +30,7 @@ import com.addthis.maljson.JSONObject;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
 
-import org.eclipse.jetty.websocket.WebSocket;
-import org.eclipse.jetty.websocket.WebSocketHandler;
+import org.eclipse.jetty.io.Connection;
 import org.slf4j.Logger;
 
 import org.slf4j.LoggerFactory;

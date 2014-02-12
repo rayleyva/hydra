@@ -53,9 +53,13 @@ import com.yammer.metrics.core.Counter;
 
 import org.eclipse.jetty.server.Connector;
 import org.eclipse.jetty.server.Handler;
+import org.eclipse.jetty.server.HttpConfiguration;
+import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.NCSARequestLog;
+import org.eclipse.jetty.server.NetworkConnector;
 import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.server.handler.AbstractHandler;
 import org.eclipse.jetty.server.handler.HandlerCollection;
 import org.eclipse.jetty.server.handler.RequestLogHandler;
@@ -141,7 +145,8 @@ public class QueryServer extends AbstractHandler {
         queryServer.start();
         htmlQueryServer = startHtmlQueryServer();
 
-        log.info("[init] query port=" + queryPort + ", web port=" + htmlQueryServer.getConnectors()[0].getPort());
+        log.info("[init] query port=" + queryPort + ", web port=" +
+                 ((NetworkConnector) htmlQueryServer.getConnectors()[0]).getPort());
 
         Runtime.getRuntime().addShutdownHook(new Thread() {
             public void run() {
@@ -170,20 +175,16 @@ public class QueryServer extends AbstractHandler {
     }
 
     private Server startHtmlQueryServer() throws Exception {
-        Server htmlQueryServer = new Server(webPort);
-        if (accessLogEnabled) {
-            htmlQueryServer.setHandler(wrapWithLogging(this));
-        } else {
-            htmlQueryServer.setHandler(this);
-        }
-        Connector connector0 = htmlQueryServer.getConnectors()[0];
-        connector0.setMaxIdleTime(600000);
-        connector0.setRequestBufferSize(headerBufferSize);
-        connector0.setRequestHeaderSize(headerBufferSize);
+        Server htmlQueryServer = new Server(queuedThreadPool);
+        htmlQueryServer.setHandler(accessLogEnabled ? wrapWithLogging(this) : this);
+        HttpConfiguration http_config = new HttpConfiguration();
+        http_config.setRequestHeaderSize(headerBufferSize);
+        ServerConnector http = new ServerConnector(htmlQueryServer, new HttpConnectionFactory(http_config));
+        http.setPort(webPort);
+        http.setIdleTimeout(600000);
+        htmlQueryServer.addConnector(http);
         htmlQueryServer.setAttribute("headerBufferSize", headerBufferSize);
         htmlQueryServer.setAttribute("org.eclipse.jetty.server.Request.maxFormContentSize", -1);
-
-        htmlQueryServer.setThreadPool(queuedThreadPool);
         htmlQueryServer.start();
         return htmlQueryServer;
     }
@@ -408,7 +409,7 @@ public class QueryServer extends AbstractHandler {
                     out.write(buf, 0, read);
                 }
             } else if (target.startsWith("/ws")) {
-                webSocketManager.handle(target, baseRequest, request, response);
+//                webSocketManager.handle(target, baseRequest, request, response);
             } else {
                 if (log.isDebugEnabled()) {
                     log.debug("[http.unhandled] " + target);

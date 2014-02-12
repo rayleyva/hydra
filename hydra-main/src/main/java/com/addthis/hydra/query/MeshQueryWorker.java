@@ -37,7 +37,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yammer.metrics.reporting.MetricsServlet;
 
 import org.eclipse.jetty.server.Connector;
+import org.eclipse.jetty.server.HttpConfiguration;
+import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
@@ -142,7 +145,11 @@ public class MeshQueryWorker {
      * @throws Exception
      */
     private Server startHtmlQueryServer() throws Exception {
-        Server htmlQueryServer = new Server(webPort);
+        Server htmlQueryServer = new Server(queuedThreadPool);
+        ServerConnector http = new ServerConnector(htmlQueryServer);
+        http.setPort(webPort);
+        http.setIdleTimeout(600000);
+        htmlQueryServer.addConnector(http);
 
         //Using a servlet as a handler requires a lot of boilerplate
         ServletContextHandler context = new ServletContextHandler(ServletContextHandler.SESSIONS);
@@ -155,10 +162,6 @@ public class MeshQueryWorker {
         //For viewing/modifying system arbitrary parameters on the fly -- instead of say, mbeans
 //      context.addServlet(new ServletHolder(new ReflectionServlet()),"/reflect/*");
 
-        Connector connector0 = htmlQueryServer.getConnectors()[0];
-        connector0.setMaxIdleTime(600000);
-
-        htmlQueryServer.setThreadPool(queuedThreadPool);
         htmlQueryServer.start();
         return htmlQueryServer;
     }
@@ -168,7 +171,7 @@ public class MeshQueryWorker {
      * <p/>
      * Does not currently support setting variables -- would need some kind of concurrency enforcement probably.
      */
-    private class ReflectionServlet extends HttpServlet {
+    private static class ReflectionServlet extends HttpServlet {
 
         public ReflectionServlet() {
 
@@ -198,7 +201,7 @@ public class MeshQueryWorker {
         }
     }
 
-    private void writePropertiesFile() {
+    private static void writePropertiesFile() {
         try {
             File propFile = new File(logDir, propFileName);
             FileWriter writer = new FileWriter(propFile);
